@@ -36,20 +36,23 @@ def mse_loss(targets, predictions):
   return jnp.mean(jnp.power((targets - (predictions)),2))
 
 def cross_entropy_loss(target, pred, num_actions=4, eps=1e-08):
-  print('target:',target,  target.shape)
-  print('pred:', pred,pred.shape)
+  #print('target:',target,  target.shape)
+  #print('pred:', pred,pred.shape)
   one_hot = jax.nn.one_hot(target, num_actions)
-  print('one_hot:',one_hot, one_hot.shape)
+  #print('one_hot:',one_hot, one_hot.shape)
   
   log_pre = jnp.log(pred) + eps
   multi = one_hot * log_pre
   sum_op = jnp.sum(one_hot * log_pre)
+  #-jnp.mean(sum_op)
+  return -sum_op
 
-  return -jnp.mean(sum_op)
-
-@functools.partial(jax.jit, static_argnums=(0))
+#@functools.partial(jax.jit, static_argnums=(0))
 def train_H(network_def, optimizer, states, actions, z, rng):
 
+  #print('states:',states)
+  #print('actions:', actions)
+  #print('z:',z)
 
   online_params_H = optimizer.target
   states = states.reshape(128,1)
@@ -58,6 +61,7 @@ def train_H(network_def, optimizer, states, actions, z, rng):
   concatenate = jnp.hstack((states, z))
   states = jnp.array([[concatenate]])
   states = states.reshape(concatenate.shape[0],concatenate.shape[1],1,1)
+  #print('states:', states)
 
   def loss_fn(params, rng_input, target_actions):
     def q_online(state):
@@ -76,7 +80,7 @@ def train_H(network_def, optimizer, states, actions, z, rng):
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
   (mean_loss, loss), grad = grad_fn(online_params_H, rng2, actions)
   optimizer = optimizer.apply_gradient(grad)
-  return optimizer, loss
+  return optimizer, loss, mean_loss
 
 
 @functools.partial(jax.jit, static_argnums=(0, 9,10,11,12,13, 14))
@@ -170,6 +174,8 @@ def select_action(network_def, network_def_H, params, params_H, state, rng, num_
 
   #array_eval = jnp.array([48, 98, 99, 52, 2447, 2448])
   #array_eval = jnp.array([48, 98, 99])
+  '''
+
   array_eval = jnp.array([48, 99])
   n = state in array_eval
 
@@ -183,6 +189,7 @@ def select_action(network_def, network_def_H, params, params_H, state, rng, num_
     selected_action_H = jnp.argmax(distri_action_H)
     print("action-H:", selected_action_H)
     print('------------------------------------------------------------------------')
+  '''
 
   p = jax.random.uniform(rng1)
   return rng, jnp.where(p <= epsilon,
@@ -287,9 +294,7 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
         optimizer=optimizer,
         epsilon_fn=dqn_agent.identity_epsilon if self._noisy == True else epsilon_fn)
 
-    
-    network_H = functools.partial(network_H,
-                                num_actions=num_actions,
+    self.network_def_H = network_H(num_actions=num_actions,
                                 net_conf=self._net_conf,
                                 env=self._env,
                                 normalize_obs=self._normalize_obs,
@@ -298,9 +303,6 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
                                 noisy=self._noisy,
                                 dueling=self._dueling,
                                 initzer=self._initzer)
-
-    self.network_def_H = network_H(num_actions=num_actions)
-
 
     self._replay_scheme = replay_scheme
     self._curr_episode = 0
@@ -319,9 +321,9 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
   def _build_networks_and_optimizer_H(self):
     self._rng, rng = jax.random.split(self._rng)
     self.state = self.state.reshape(1)
-    concatenate = jnp.hstack((self.state, self.return_rg)) #TODO
+    concatenate = jnp.hstack((self.state, self.return_rg))
     concatenate = jnp.array([[concatenate]])
-    #print('concatenate.shape:', concatenate.shape)
+    #print('concatenate.shape:', concatenate, concatenate.shape)
 
     online_network_params_H = self.network_def_H.init(rng, x=concatenate, rng=self._rng)
     optimizer_def_H = dqn_agent.create_optimizer(self._optimizer_name)
@@ -330,8 +332,6 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
 
   @property
   def online_params_H(self):
-    # We set up this symlink to use the params that are being updated by the
-    # optimizer.
     return self.optimizer_H.target
 
 
@@ -381,9 +381,6 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
 
         self.return_rg = jnp.ones(self.replay_elements['return'].shape[0])*return_rg
 
-        self.replay_elements_state = self.replay_elements['state']
-        self.replay_elements_action = self.replay_elements['action']
-
         self.optimizer, loss, mean_loss = train(self.network_def,
                                      self.target_network_params,
                                      self.optimizer,
@@ -422,21 +419,23 @@ class JaxDQNAgentNew(dqn_agent.JaxDQNAgent):
 
   def _train_step_H(self):
     if self._replay.add_count > self.min_replay_history:
-      self._sample_from_replay_buffer()
-      
-      f = (self._replay.max_episode_return-self._replay.min_episode_return)
-      if f > 1e-3:
-        return_rg=(self.replay_elements['return']-self._replay.min_episode_return)/f
-      else:
-        return_rg=0
-
-      self.return_rg = jnp.ones(self.replay_elements['return'].shape[0])*return_rg
-      self.optimizer_H, loss_H = train_H(self.network_def_H,
+        self._sample_from_replay_buffer()
+        #print('/////////////////////////////////////////////////////////////////')
+        #print('self.replay_elements[state]:', self.replay_elements['state'])
+        #print('self.replay_elements[action]:', self.replay_elements['action'])
+        #self.return_rg = jnp.ones(self.replay_elements['return'].shape[0])*return_rg
+        self.optimizer_H, loss_H, mean_loss_H = train_H(self.network_def_H,
                                      self.optimizer_H,
+                                     self.replay_elements['state'],
                                      self.replay_elements['action'],
-                                     self.replay_elements['next_state'],
-                                     self.return_rg,
+                                     self.replay_elements['return'],
                                      self._rng)
+        if (self.summary_writer is not None and
+            self.training_steps > 0 and
+            self.training_steps % self.summary_writing_frequency == 0):
+              summary = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(tag='cross_entropy_loss', simple_value=loss_H)])
+            self.summary_writer.add_summary(summary, self.training_steps)
+
 
   def _store_transition(self,
                         last_observation,

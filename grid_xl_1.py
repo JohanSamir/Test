@@ -9,8 +9,6 @@ class GridXL:
   """GridXL environment."""
 
   def __init__(self, size=50, gamma=0.99, timeout=500, std=0.):
-  #def __init__(self, size=50, gamma=0.99, timeout=400, std=0.):  
-  #def __init__(self, size=3, gamma=0.99, timeout=20, std=0.):
     # discount
     self.gamma = gamma
     self.timeout = timeout
